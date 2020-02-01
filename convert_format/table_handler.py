@@ -346,9 +346,9 @@ def convert_trade0(data):
 
 
 def convert_trades0(data):
-    """Rebate? Total?"""
+    """Rebate? Total? Quantity?"""
     data["Date"] = transform_date(data["Date (UTC)"])
-    renaming = {"Side": "Action", "Quantity": "Volume"}
+    renaming = {"Side": "Action"}
     renamed = data.rename(columns=renaming)
     renamed["Symbol"] = renamed["Instrument"].str.split("/", expand=True)[0]
     renamed["Currency"] = renamed["Instrument"].str.split("/", expand=True)[1]

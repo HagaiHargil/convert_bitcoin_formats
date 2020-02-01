@@ -1,0 +1,1 @@
+# Converter of Excel sheets to a known Coin exchange format

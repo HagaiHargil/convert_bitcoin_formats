@@ -16,7 +16,7 @@ conversion_summary = "No files were loaded"
 dispatch_dict = {'Convert': convert_button}
 layout = [[sg.Text('Choose a file to convert:')],
           [sg.Text('Filename', size=(8, 1)), sg.Input(size=(50, 1)), sg.FileBrowse()],
-          [sg.Text('_' * 30)],
+          [sg.Text("Results:")],
           [sg.Text(conversion_summary, key="summary", size=(100, 10), background_color='white', font=('Helvetica', 16))],
           [sg.Button('Convert'), sg.Quit()]]
 

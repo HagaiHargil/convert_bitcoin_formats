@@ -2,7 +2,6 @@ import pathlib
 from collections import namedtuple
 
 import pandas as pd
-import numpy as np
 
 from table_handler import identify_table_origin, mandatory_columns
 
@@ -32,14 +31,14 @@ def filter_unneeded_rows(data: pd.DataFrame) -> FilteredData:
     num_of_ok_rows = correct_rows.sum()
     if num_of_ok_rows == len(data):
         return FilteredData(data, {})
-
+    legal_rows = data.loc[correct_rows, :]
     illegal_rows = data.loc[~correct_rows, :]
     unique_illegal = illegal_rows["Action"].unique()
     uniques = {}
     for unique in unique_illegal:
         values = data.loc[data["Action"] == unique, :]
         uniques[unique] = (len(values), values.index.to_numpy() + 1)
-    return FilteredData(data, uniques)
+    return FilteredData(legal_rows, uniques)
 
 
 def format_result(filtered: FilteredData, original_size: int) -> str:
@@ -48,23 +47,31 @@ def format_result(filtered: FilteredData, original_size: int) -> str:
     """
     if len(filtered.data) == original_size:
         return f"All {original_size} rows were converted successfully."
-    formatted = f"{original_size} rows converted successfully. Illegal rows were:\n\n"
-    df = pd.DataFrame(filtered.illegal)
-    formatted = formatted + df.to_markdown()
+    formatted = f"{len(filtered.data)} rows converted successfully. Illegal rows were:\n\n"
+    df = pd.DataFrame(filtered.illegal).transpose()
+    df = df.rename(columns={0: "Number of rows", 1: "Row Index"})
+    df.index.name = 'Action'
+    formatted = formatted + repr(df)
     return formatted
 
 
-def run(file):
+def run(file) -> str:
     data = read_data(file)
     try:
         returned = identify_table_origin(data.columns)(data)
-    except NotImplementedError:
-        return ''
-    assert all(col in returned.columns for col in mandatory_columns)
+    except (NotImplementedError, KeyError):
+        return "Unknown table format. Please contact the application's author."
+    try:
+        assert all(col in returned.columns for col in mandatory_columns)
+    except AssertionError:
+        return "Internal Error. Please contact the application's author."
     filtered = filter_unneeded_rows(returned)
     new_fname = file.stem + '_converted' + '.csv'
     new_fname = file.with_name(new_fname)
-    filtered.data.to_csv(new_fname, index=False, float_format="%f")
+    try:
+        filtered.data.to_csv(new_fname, index=False, float_format="%f")
+    except PermissionError:
+        return "Unable to save file in folder. Please make sure it exists and that you have sufficient permissions to write to that directory, and try again."
     formatted = format_result(filtered, len(returned))
     return formatted
 
