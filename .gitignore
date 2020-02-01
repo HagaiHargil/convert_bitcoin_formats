@@ -1,7 +1,11 @@
 .vscode/
 dist/
 build/
+output/
+upx*/
 **/__pycache__/
 *#
+*.pyo
+converter.egg-info/
 .mypy_cache/
 *_converted.csv
