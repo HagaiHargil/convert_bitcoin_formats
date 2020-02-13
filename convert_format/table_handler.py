@@ -7,6 +7,8 @@ import numpy as np
 
 
 mandatory_columns = ["Date", "Action", "Symbol", "Volume", "Currency"]
+all_columns = mandatory_columns + ["Account", "Total", "Price", "Fee", "FeeCurrency"]
+
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S %z"
 
 binance0 = (

@@ -3,7 +3,7 @@ from collections import namedtuple
 
 import pandas as pd
 
-from table_handler import identify_table_origin, mandatory_columns
+from table_handler import identify_table_origin, mandatory_columns, all_columns
 
 
 FilteredData = namedtuple("FilteredData", "data, illegal")
@@ -55,6 +55,11 @@ def format_result(filtered: FilteredData, original_size: int) -> str:
     return formatted
 
 
+def reorder_columns(data: pd.DataFrame):
+    """Reorders the columns of the given dataframe by the expected order"""
+    return data.reindex(all_columns, axis=1)
+
+
 def run(file) -> str:
     data = read_data(file)
     try:
@@ -65,6 +70,7 @@ def run(file) -> str:
         assert all(col in returned.columns for col in mandatory_columns)
     except AssertionError:
         return "Internal Error. Please contact the application's author."
+    returned = reorder_columns(returned)
     filtered = filter_unneeded_rows(returned)
     new_fname = file.stem + '_converted' + '.csv'
     new_fname = file.with_name(new_fname)
@@ -81,6 +87,7 @@ if __name__ == "__main__":
     bit2c0 = pathlib.Path("examples/bit2c-financial-report-2016__1_ (1).xlsx")
     bit2c1 = pathlib.Path("examples/bit2c-financial-report-2018.xlsx")
     bitfinex0 = pathlib.Path("examples/Bitfinex Trades .csv")
+    bitfinex1 = pathlib.Path("shamosh123_trades_FROM_Fri-Dec-25-2015_TO_Tue-Dec-24-2019_ON_2019-12-24T09-36-59.318Z.csv")
     bittrex0 = pathlib.Path("examples/BittrexOrderHistory_2017.csv")
     cex0 = pathlib.Path("examples/CEX Trades.csv")
     exodus0 = pathlib.Path("examples/Exodus - all-txs-2019-03-13_04-58-29.csv")
@@ -97,6 +104,7 @@ if __name__ == "__main__":
         bit2c0,
         bit2c1,
         bitfinex0,
+        bitfinex1,
         bittrex0,
         cex0,
         exodus0,
