@@ -87,7 +87,7 @@ if __name__ == "__main__":
     bit2c0 = pathlib.Path("examples/bit2c-financial-report-2016__1_ (1).xlsx")
     bit2c1 = pathlib.Path("examples/bit2c-financial-report-2018.xlsx")
     bitfinex0 = pathlib.Path("examples/Bitfinex Trades .csv")
-    bitfinex1 = pathlib.Path("shamosh123_trades_FROM_Fri-Dec-25-2015_TO_Tue-Dec-24-2019_ON_2019-12-24T09-36-59.318Z.csv")
+    bitfinex1 = pathlib.Path("examples/shamosh123_trades_FROM_Fri-Dec-25-2015_TO_Tue-Dec-24-2019_ON_2019-12-24T09-36-59.318Z.csv")
     bittrex0 = pathlib.Path("examples/BittrexOrderHistory_2017.csv")
     cex0 = pathlib.Path("examples/CEX Trades.csv")
     exodus0 = pathlib.Path("examples/Exodus - all-txs-2019-03-13_04-58-29.csv")

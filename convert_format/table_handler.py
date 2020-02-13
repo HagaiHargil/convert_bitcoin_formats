@@ -242,8 +242,8 @@ def convert_bittrex0(data):
         "PricePerUnit": "Price",
     }
     renamed = data.rename(columns=renaming)
-    renamed["Symbol"] = renamed["Exchange"].str.split("-", expand=True)[0]
-    renamed["Currency"] = renamed["Exchange"].str.split("-", expand=True)[1]
+    renamed["Symbol"] = renamed["Exchange"].str.split("-", expand=True)[1]
+    renamed["Currency"] = renamed["Exchange"].str.split("-", expand=True)[0]
     renamed["Action"] = renamed["OrderType"].str.split("_", expand=True)[1]
     return renamed
 
@@ -283,20 +283,23 @@ def convert_exodus0(data):
 
 
 def convert_ledgers0(data):
-    """Trade - minus is sell? asset?"""
-    data["Date"] = transform_date(data["time"])
+    """What is the "amount" of the second row of each trade?"""
+    parsed = []
+    converted_row = pd.DataFrame(columns=all_columns)
     renaming = {"type": "Action", "asset": "Symbol", "amount": "Volume", "fee": "Fee"}
-    renamed = data.rename(columns=renaming)
-    renamed["Action"] = renamed["Action"].str.upper()
-    renamed.loc[
-        (renamed["Action"] == "TRADE") & (renamed["Volume"] > 0), "Action"
-    ] = "BUY"
-    renamed.loc[
-        (renamed["Action"] == "TRADE") & (renamed["Volume"] < 0), "Action"
-    ] = "SELL"
-    renamed["Currency"] = renamed["Symbol"]
-    renamed["Volume"] = np.abs(renamed["Volume"])
-    return renamed
+    for _, trade in data.groupby('refid'):
+        if len(trade) != 2:
+            continue
+        converted_row["Date"] = transform_date(trade.loc[:, 'time']).iloc[0]
+        renamed = trade.rename(columns=renaming)
+        coin_names = renamed["Symbol"].str[1:].str.replace('XBT', 'BTC')
+        converted_row["Currency"] = coin_names.iloc[0]
+        converted_row["Symbol"] = coin_names.iloc[1]
+        converted_row["Action"] = 'SELL' if renamed.iloc[0, 6] < 0 else 'BUY'
+        converted_row["Volume"] = np.abs(converted_row["Volume"])
+        parsed.append(converted_row.copy())
+
+    return pd.concat(parsed)
 
 
 def convert_lqui0(data):
@@ -350,11 +353,12 @@ def convert_trade0(data):
 def convert_trades0(data):
     """Rebate? Total? Quantity?"""
     data["Date"] = transform_date(data["Date (UTC)"])
-    renaming = {"Side": "Action"}
+    renaming = {"Side": "Action", "Quantity": "Volume", "Volume": "TotalBeforeFee"}
     renamed = data.rename(columns=renaming)
     renamed["Symbol"] = renamed["Instrument"].str.split("/", expand=True)[0]
     renamed["Currency"] = renamed["Instrument"].str.split("/", expand=True)[1]
     renamed["Action"] = renamed["Action"].str.upper()
+    renamed["Fee"] += renamed["Rebate"]
     return renamed
 
 
