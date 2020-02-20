@@ -229,6 +229,7 @@ def convert_bitfinex0(data):
     renamed.loc[(renamed["Volume"] > 0), "Action"] = "BUY"
     renamed.loc[(renamed["Volume"] < 0), "Action"] = "SELL"
     renamed["Volume"] = np.abs(renamed["Volume"])
+    renamed['Account'] = 'Bitfinex'
     return renamed
 
 
