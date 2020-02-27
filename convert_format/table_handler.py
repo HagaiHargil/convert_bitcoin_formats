@@ -250,7 +250,21 @@ def convert_bittrex0(data):
 
 
 def convert_cex0(data):
-    """Pair"""
+    """Converts the CEX Trades files to the supported format.
+    The idea is to separate the dataframe to two main groups -
+    selling actions and buying actions. Inside these two groups
+    we'll again separate the tables into the row which declares
+    order ("Sell Order XXX" for example) and the actual
+    actions or instructions.
+
+    Once this division was made we'll parse the two groups -
+    selling and buying orders - separately, and construct a new
+    dataframe containing both, with one line per transaction,
+    either sell or buy.
+
+    Finally we'll also add the fee of a transaction based on the
+    fee row which is sometimes present.
+    """
     data["Date"] = transform_date(data["DateUTC"])
     renaming = {
         "Type": "Action",
@@ -258,10 +272,99 @@ def convert_cex0(data):
         "FeeAmount": "Fee",
         "Amount": "Volume",
     }
-    renamed = data.rename(columns=renaming)
-    renamed["Currency"] = data["Pair"].str.split("/", expand=True)[1]
-    renamed["Action"] = renamed["Action"].str.upper()
+    buy_orders = data["Comment"].isin(["Buy Order"])
+    buy_orders = data.loc[buy_orders, :]
+    sell_orders = data["Comment"].isin(["Sell Order"])
+    sell_orders = data.loc[sell_orders, :]
+    buy_actions = data["Comment"].isin(["Sold "])
+    buy_actions = data.loc[buy_actions, :]
+    sell_actions = data["Comment"].isin(["Bought "])
+    sell_actions = data.loc[sell_actions, :]
+    fees = data.loc[data["type"] == "costsNothing", :]
+    assert len(buy_orders) + len(sell_orders) + len(buy_actions) + len(sell_actions) + len(fees) == len(data)
+    fees = _turn_fees_to_dict(fees)
+    _process_cex_order_action_pair(buy_orders, buy_actions, 'Bought', fees)
+    _process_cex_order_action_pair(sell_orders, sell_actions, 'Sold', fees)
     return renamed
+
+
+def _process_cex_order_action_pair(orders, actions, name, fees):
+    """Helper function for CEX processing which finds the groups
+    of selling or buying actions.
+
+    This functions iterates over orders (rows with "Buy\Sell"
+    Order #) and finds their corresponding "action" rows, i.e.
+    rows that describe the actual transactions that were carried
+    as a result of that order.
+
+    It does so by try to sum up all actions that - if summed -
+    result in an amount similar to the one describe in the parent
+    order.
+    """
+
+    df = pd.DataFrame([], columns=['Date', 'Action', 'Symbol', 'Volume', 'Currency', 'Account', 'Price', 'Fee', 'FeeCurrency'])
+    currency_regex = re.compile(' at ([\d\.]+) [A-Z]+')
+    symbol_regex = re.compile(f'{name} ([\d\.]+) [A-Z]+ at)')
+    number_regex = re.compile(' #(\d+)')
+    new_df = []
+    while len(orders) > 0:
+        current_order = orders.head(1)
+        orders = orders.drop(current_order.index)
+        order_amount = np.abs(current_order["Amount"])
+        order_number = number_regex.findall(current_order['Comment'])[0]
+        order_volume_in_coins = abs(order_amount) if current_order["Symbol"] is not 'USD' else 0
+        later_actions = actions.loc[actions["Date"] > current_order["Date"], :]
+        actions_of_order = []
+        average_price_of_actions = 0
+        for index, action in later_actions.iter_rows():
+            currency_price = float(currency_regex.findall(action["Comment"])[0])
+            symbol_amount = float(symbol_amount.findall(action["Comment"])[0])
+            if action["Symbol"] is not 'USD':
+                expected_amount = symbol_amount
+            else:
+                expected_amount = symbol_amount * currency_price
+           if np.isclose([expected_amount], [order_amount, 0.01, 0.01]).all():
+               actions_of_order.append(index)
+               average_price_of_actions += currency_price
+               if action["Symbol"] is not 'USD':
+                   order_volume_in_coins += action["Amount"]
+               break
+           elif np.round(order_amount, decimals=2) + 0.01 < expected_amount:
+               continue
+           else:
+               order_amount -= expected_amount
+               actions_of_order.append(index)
+               average_price_of_actions += currency_price
+               if action["Symbol"] is not 'USD':
+                   order_volume_in_coins += action["Amount"]
+        else:
+            raise AssertionError("Iterated over all actions and couldn't find a corresponding one.")
+        df_of_order = df.copy()
+        df_of_order['Date'] = current_order["Date"]
+        df_of_order['Action'] = current_order["Type"].upper()
+        df_of_order['Symbol'] = current_order["Symbol"]
+        df_of_order['Volume'] = order_volume_in_coins
+        df_of_order['Currency'] = current_order['Symbol']
+        df_of_order['Account'] = 'CEX'
+        df_of_order['Price'] = average_price_of_actions / len(actions_of_order)
+        df_of_order['Fee'] = fees[order_number][0]
+        df_of_order['FeeCurrency'] = fees[order_number][1]
+        new_df.append(df_of_order)
+        actions = actions.drop(actions_of_order, axis=0)
+
+    return pd.concat(new_df)
+
+
+def turn_fees_to_dict(fees):
+    """Turns the fees dataframe into a dictionary with the key being the
+    order number and the values being a 2-tuple of (amount, currency)"""
+    fees_dict = {}
+    number_regex = re.compile(' #(\d+)')
+    for index, row in fees.iter_rows():
+        order_number = number_regex.findall(row["Comment"])[0]
+        amount = row["Amount"]
+        currency = row["Symbol"]
+        fees_dict[order_number] = (amount, currency)
 
 
 def convert_exodus0(data):
