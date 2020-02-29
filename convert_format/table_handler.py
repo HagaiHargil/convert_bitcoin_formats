@@ -2,6 +2,10 @@
 This module contains methods that convert each table type
 to the correct format.
 """
+import re
+from datetime import datetime
+from itertools import combinations
+
 import pandas as pd
 import numpy as np
 
@@ -229,7 +233,7 @@ def convert_bitfinex0(data):
     renamed.loc[(renamed["Volume"] > 0), "Action"] = "BUY"
     renamed.loc[(renamed["Volume"] < 0), "Action"] = "SELL"
     renamed["Volume"] = np.abs(renamed["Volume"])
-    renamed['Account'] = 'Bitfinex'
+    renamed["Account"] = "Bitfinex"
     return renamed
 
 
@@ -266,26 +270,26 @@ def convert_cex0(data):
     fee row which is sometimes present.
     """
     data["Date"] = transform_date(data["DateUTC"])
-    renaming = {
-        "Type": "Action",
-        "FeeSymbol": "FeeCurrency",
-        "FeeAmount": "Fee",
-        "Amount": "Volume",
-    }
-    buy_orders = data["Comment"].isin(["Buy Order"])
+    buy_orders = data["Comment"].str.contains("Buy Order")
     buy_orders = data.loc[buy_orders, :]
-    sell_orders = data["Comment"].isin(["Sell Order"])
+    sell_orders = data["Comment"].str.contains("Sell Order")
     sell_orders = data.loc[sell_orders, :]
-    buy_actions = data["Comment"].isin(["Sold "])
+    buy_actions = data["Comment"].str.contains("Bought ")
     buy_actions = data.loc[buy_actions, :]
-    sell_actions = data["Comment"].isin(["Bought "])
+    sell_actions = data["Comment"].str.contains("Sold ")
     sell_actions = data.loc[sell_actions, :]
-    fees = data.loc[data["type"] == "costsNothing", :]
-    assert len(buy_orders) + len(sell_orders) + len(buy_actions) + len(sell_actions) + len(fees) == len(data)
+    fees = data.loc[data["Type"].str.contains("costsNothing"), :]
+    assert len(buy_orders) + len(sell_orders) + len(buy_actions) + len(
+        sell_actions
+    ) + len(fees) == len(data)
     fees = _turn_fees_to_dict(fees)
-    _process_cex_order_action_pair(buy_orders, buy_actions, 'Bought', fees)
-    _process_cex_order_action_pair(sell_orders, sell_actions, 'Sold', fees)
-    return renamed
+    bought_transactions = _process_cex_order_action_pair(
+        buy_orders, buy_actions, "Bought", fees
+    )
+    sold_transactions = _process_cex_order_action_pair(
+        sell_orders, sell_actions, "Sold", fees
+    )
+    return pd.concat([bought_transactions, sold_transactions], ignore_index=True)
 
 
 def _process_cex_order_action_pair(orders, actions, name, fees):
@@ -301,70 +305,173 @@ def _process_cex_order_action_pair(orders, actions, name, fees):
     result in an amount similar to the one describe in the parent
     order.
     """
+    dtypes = {
+        "Date": "datetime64[ns]",
+        "Action": object,
+        "Symbol": object,
+        "Volume": np.float64,
+        "Currency": object,
+        "Account": object,
+        "Price": np.float64,
+        "Fee": np.float64,
+        "FeeCurrency": object,
+    }
+    df = pd.DataFrame(
+        [],
+        columns=[
+            "Date",
+            "Action",
+            "Symbol",
+            "Volume",
+            "Currency",
+            "Account",
+            "Price",
+            "Fee",
+            "FeeCurrency",
+        ],
+    ).astype(dtypes)
 
-    df = pd.DataFrame([], columns=['Date', 'Action', 'Symbol', 'Volume', 'Currency', 'Account', 'Price', 'Fee', 'FeeCurrency'])
-    currency_regex = re.compile(' at ([\d\.]+) [A-Z]+')
-    symbol_regex = re.compile(f'{name} ([\d\.]+) [A-Z]+ at)')
-    number_regex = re.compile(' #(\d+)')
+    number_regex = re.compile(" #(\d+)")
     new_df = []
+    row_index = 0
+    actions = _create_processed_actions_df(actions.copy(), name)
     while len(orders) > 0:
         current_order = orders.head(1)
         orders = orders.drop(current_order.index)
-        order_amount = np.abs(current_order["Amount"])
-        order_number = number_regex.findall(current_order['Comment'])[0]
-        order_volume_in_coins = abs(order_amount) if current_order["Symbol"] is not 'USD' else 0
-        later_actions = actions.loc[actions["Date"] > current_order["Date"], :]
-        actions_of_order = []
+        order_amount = np.abs(current_order["Amount"].iloc[0])
+        order_number = number_regex.findall(current_order["Comment"].iloc[0])[0]
+        order_volume_in_coins = (
+            abs(order_amount) if current_order["Symbol"].iloc[0] != "USD" else 0
+        )
+        later_actions = actions.loc[actions["Date"] >= current_order["Date"].iloc[0], :]
         average_price_of_actions = 0
-        for index, action in later_actions.iter_rows():
-            currency_price = float(currency_regex.findall(action["Comment"])[0])
-            symbol_amount = float(symbol_amount.findall(action["Comment"])[0])
-            if action["Symbol"] is not 'USD':
-                expected_amount = symbol_amount
-            else:
-                expected_amount = symbol_amount * currency_price
-           if np.isclose([expected_amount], [order_amount, 0.01, 0.01]).all():
-               actions_of_order.append(index)
-               average_price_of_actions += currency_price
-               if action["Symbol"] is not 'USD':
-                   order_volume_in_coins += action["Amount"]
-               break
-           elif np.round(order_amount, decimals=2) + 0.01 < expected_amount:
-               continue
-           else:
-               order_amount -= expected_amount
-               actions_of_order.append(index)
-               average_price_of_actions += currency_price
-               if action["Symbol"] is not 'USD':
-                   order_volume_in_coins += action["Amount"]
+        identical_action_to_order = later_actions.loc[
+            np.isclose(later_actions.loc[:, "expected"], [order_amount], 0.01, 0.001)
+        ]
+        if len(identical_action_to_order) == 1:
+            actions_of_order = identical_action_to_order.index
+            average_price_of_actions = identical_action_to_order.loc[
+                actions_of_order[0], "currency_price"
+            ]
+            symbol = identical_action_to_order.loc[actions_of_order[0], "parsed_symbol"]
+            currency = identical_action_to_order.loc[
+                actions_of_order[0], "parsed_currency"
+            ]
+            order_volume_in_coins += identical_action_to_order.loc[
+                actions_of_order[0], "order_volume_in_coins"
+            ]
+        elif len(identical_action_to_order) >= 2:
+            raise AssertionError(
+                f"Two or more transactions found that could be assigned to order {current_order}. Exiting."
+            )
+        # Case of no one-to-one correspondence between order and action
         else:
-            raise AssertionError("Iterated over all actions and couldn't find a corresponding one.")
-        df_of_order = df.copy()
-        df_of_order['Date'] = current_order["Date"]
-        df_of_order['Action'] = current_order["Type"].upper()
-        df_of_order['Symbol'] = current_order["Symbol"]
-        df_of_order['Volume'] = order_volume_in_coins
-        df_of_order['Currency'] = current_order['Symbol']
-        df_of_order['Account'] = 'CEX'
-        df_of_order['Price'] = average_price_of_actions / len(actions_of_order)
-        df_of_order['Fee'] = fees[order_number][0]
-        df_of_order['FeeCurrency'] = fees[order_number][1]
-        new_df.append(df_of_order)
+            pair_found = False
+            for number_of_items_per_group in range(2, 20):
+                if pair_found:
+                    break
+                combs = combinations(later_actions.index, number_of_items_per_group)
+                for comb in combs:
+                    current_pair = later_actions.loc[comb, :]
+                    if np.isclose(
+                        [current_pair.loc[:, "expected"].sum()],
+                        [order_amount],
+                        0.01,
+                        0.01,
+                    ).all():
+                        pair_found = True
+                        break
+            else:
+                raise AssertionError(
+                    f"More than 20 lines were needed to find all transactions of order {current_order}. Exiting."
+                )
+            # We're found a pair (or a triplet) of transactions that together make up one
+            # order. We'll now parse its parameters.
+
+            actions_of_order = current_pair.index
+            average_price_of_actions = current_pair.loc[:, "currency_price"].mean()
+            order_volume_in_coins += current_pair.loc[:, "order_volume_in_coins"].sum()
+            symbol = current_pair.loc[actions_of_order[0], "parsed_symbol"]
+            currency = current_pair.loc[actions_of_order[0], "parsed_currency"]
+        df_of_order = {}
+        df_of_order["Date"] = current_order["Date"].iloc[0]
+        df_of_order["Action"] = current_order["Type"].iloc[0].upper()
+        df_of_order["Symbol"] = symbol
+        df_of_order["Volume"] = order_volume_in_coins
+        df_of_order["Currency"] = currency
+        df_of_order["Account"] = "CEX"
+        df_of_order["Price"] = average_price_of_actions / len(actions_of_order)
+        try:
+            df_of_order["Fee"] = fees[order_number][0]
+        except KeyError:
+            df_of_order["Fee"] = 0
+            df_of_order["FeeCurrency"] = ""
+        else:
+            df_of_order["FeeCurrency"] = fees[order_number][1]
+        df = pd.DataFrame(df_of_order, index=[row_index]).astype(dtypes)
+        new_df.append(df)
         actions = actions.drop(actions_of_order, axis=0)
+        row_index += 1
+    return pd.concat(new_df, ignore_index=True)
 
-    return pd.concat(new_df)
 
-
-def turn_fees_to_dict(fees):
+def _turn_fees_to_dict(fees):
     """Turns the fees dataframe into a dictionary with the key being the
     order number and the values being a 2-tuple of (amount, currency)"""
     fees_dict = {}
-    number_regex = re.compile(' #(\d+)')
-    for index, row in fees.iter_rows():
+    number_regex = re.compile(" #(\d+)")
+    for index, row in fees.iterrows():
         order_number = number_regex.findall(row["Comment"])[0]
         amount = row["Amount"]
         currency = row["Symbol"]
         fees_dict[order_number] = (amount, currency)
+    return fees_dict
+
+
+def _create_processed_actions_df(actions, name):
+    """Generates a more robust and useful actions DataFrame,
+    containing the needed information for each action in an easy-to-use format.
+    It's useful since it will speed up its iteration and parsing later on.
+    """
+    symbol_price_regex = re.compile(f"{name} ([\d\.]+) [A-Z]+ at")
+    currency_price_regex = re.compile(" at ([\d\.]+) [A-Z]+")
+    currency_name_regex = re.compile(" at [\d\.]+ ([A-Z]+)")
+    symbol_name_regex = re.compile(f"{name} [\d\.]+ ([A-Z]+) at")
+    added_data = []
+    new_columns = [
+        ("expected", np.float64(0.0)),
+        ("order_volume_in_coins", np.float64(0.0)),
+        ("parsed_currency", ""),
+        ("parsed_symbol", ""),
+        ("currency_price", 0.0),
+    ]
+    for col in new_columns:
+        actions.loc[:, col[0]] = col[1]
+
+    for index, action in actions.iterrows():
+        added_columns = {}
+        currency_price = float(currency_price_regex.findall(action["Comment"])[0])
+        symbol_amount = float(symbol_price_regex.findall(action["Comment"])[0])
+        if action["Symbol"] == "USD":
+            expected_amount = symbol_amount
+        else:
+            expected_amount = symbol_amount * currency_price
+        added_columns["expected"] = expected_amount
+        if action["Symbol"] != "USD":
+            order_volume_in_coins = action["Amount"]
+        else:
+            order_volume_in_coins = 0
+        added_columns["order_volume_in_coins"] = order_volume_in_coins
+        currency = currency_name_regex.findall(action["Comment"])[0]
+        symbol = symbol_name_regex.findall(action["Comment"])[0]
+        added_columns["parsed_currency"] = currency
+        added_columns["parsed_symbol"] = symbol
+        added_columns["currency_price"] = currency_price
+        added_data.append((pd.DataFrame(added_columns.copy(), index=[index])))
+
+    for datum in added_data:
+        actions.update(datum)
+    return actions
 
 
 def convert_exodus0(data):
@@ -391,15 +498,15 @@ def convert_ledgers0(data):
     parsed = []
     converted_row = pd.DataFrame(columns=all_columns)
     renaming = {"type": "Action", "asset": "Symbol", "amount": "Volume", "fee": "Fee"}
-    for _, trade in data.groupby('refid'):
+    for _, trade in data.groupby("refid"):
         if len(trade) != 2:
             continue
-        converted_row["Date"] = transform_date(trade.loc[:, 'time']).iloc[0]
+        converted_row["Date"] = transform_date(trade.loc[:, "time"]).iloc[0]
         renamed = trade.rename(columns=renaming)
-        coin_names = renamed["Symbol"].str[1:].str.replace('XBT', 'BTC')
+        coin_names = renamed["Symbol"].str[1:].str.replace("XBT", "BTC")
         converted_row["Currency"] = coin_names.iloc[0]
         converted_row["Symbol"] = coin_names.iloc[1]
-        converted_row["Action"] = 'SELL' if renamed.iloc[0, 6] < 0 else 'BUY'
+        converted_row["Action"] = "SELL" if renamed.iloc[0, 6] < 0 else "BUY"
         converted_row["Volume"] = np.abs(converted_row["Volume"])
         parsed.append(converted_row.copy())
 

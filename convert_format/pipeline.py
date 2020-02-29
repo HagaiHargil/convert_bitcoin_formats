@@ -64,7 +64,7 @@ def run(file) -> str:
     data = read_data(file)
     try:
         returned = identify_table_origin(data.columns)(data)
-    except (NotImplementedError, KeyError):
+    except (NotImplementedError, KeyError, AssertionError):
         return "Unknown table format. Please contact the application's author."
     try:
         assert all(col in returned.columns for col in mandatory_columns)
@@ -90,6 +90,7 @@ if __name__ == "__main__":
     bitfinex1 = pathlib.Path("examples/shamosh123_trades_FROM_Fri-Dec-25-2015_TO_Tue-Dec-24-2019_ON_2019-12-24T09-36-59.318Z.csv")
     bittrex0 = pathlib.Path("examples/BittrexOrderHistory_2017.csv")
     cex0 = pathlib.Path("examples/CEX Trades.csv")
+    cex1 = pathlib.Path("examples/CEX_Trades_1.csv")
     exodus0 = pathlib.Path("examples/Exodus - all-txs-2019-03-13_04-58-29.csv")
     ledgers0 = pathlib.Path("examples/ledgers.csv")
     lqui0 = pathlib.Path("examples/lqui.csv")
@@ -100,20 +101,21 @@ if __name__ == "__main__":
     trade0 = pathlib.Path("examples/tradeHistory.csv")
     trades0 = pathlib.Path("examples/trades (1).xlsx")
     files = [
-        binance0,
-        bit2c0,
-        bit2c1,
-        bitfinex0,
-        bitfinex1,
-        bittrex0,
+        # binance0,
+        # bit2c0,
+        # bit2c1,
+        # bitfinex0,
+        # bitfinex1,
+        # bittrex0,
         cex0,
-        exodus0,
-        ledgers0,
-        lqui0,
-        member0,
-        shapeshift0,
-        trade0,
-        trades0,
+        cex1,
+        # exodus0,
+        # ledgers0,
+        # lqui0,
+        # member0,
+        # shapeshift0,
+        # trade0,
+        # trades0,
     ]
     for file in files:
-        run(file)
+        res = run(file)
