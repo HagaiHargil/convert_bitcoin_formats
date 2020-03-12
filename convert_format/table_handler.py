@@ -3,17 +3,21 @@ This module contains methods that convert each table type
 to the correct format.
 """
 import re
-from datetime import datetime
+import datetime
 from itertools import combinations
+import json
 
 import pandas as pd
 import numpy as np
+import requests
 
 
 mandatory_columns = ["Date", "Action", "Symbol", "Volume", "Currency"]
 all_columns = mandatory_columns + ["Account", "Total", "Price", "Fee", "FeeCurrency"]
 
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S %z"
+
+epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 
 binance0 = (
     "Date(UTC)",
@@ -496,18 +500,23 @@ def convert_exodus0(data):
 def convert_ledgers0(data):
     """What is the "amount" of the second row of each trade?"""
     parsed = []
-    converted_row = pd.DataFrame(columns=all_columns)
-    renaming = {"type": "Action", "asset": "Symbol", "amount": "Volume", "fee": "Fee"}
+    converted_row = pd.DataFrame([np.arange(len(all_columns))], columns=all_columns)
     for _, trade in data.groupby("refid"):
         if len(trade) != 2:
             continue
+        if trade["type"].iloc[0] != 'trade':
+            continue
         converted_row["Date"] = transform_date(trade.loc[:, "time"]).iloc[0]
-        renamed = trade.rename(columns=renaming)
-        coin_names = renamed["Symbol"].str[1:].str.replace("XBT", "BTC")
-        converted_row["Currency"] = coin_names.iloc[0]
-        converted_row["Symbol"] = coin_names.iloc[1]
-        converted_row["Action"] = "SELL" if renamed.iloc[0, 6] < 0 else "BUY"
-        converted_row["Volume"] = np.abs(converted_row["Volume"])
+        coin_names = trade.loc[:, "asset"].str[1:].replace("XBT", "BTC")
+        converted_row["Currency"] = coin_names.iloc[1]
+        converted_row["FeeCurrency"] = coin_names.iloc[1]
+        converted_row["Symbol"] = coin_names.iloc[0]
+        converted_row["Action"] = "SELL" if trade.iloc[0, 6] < 0 else "BUY"
+        converted_row["Volume"] = np.abs(trade.loc[:, "amount"].iloc[0])
+        converted_row["Total"] = np.abs(trade.loc[:, "amount"].iloc[1])
+        converted_row["Fee"] = trade.loc[:, "fee"].iloc[1]
+        converted_row["Price"] = converted_row["Total"] / converted_row["Volume"]
+        converted_row["Account"] = "Kraken"
         parsed.append(converted_row.copy())
 
     return pd.concat(parsed)
@@ -532,7 +541,7 @@ def convert_member0(data):
 
 
 def convert_shapeshift0(data):
-    """Rechisha mehira?"""
+    """Uses and external API to calculate the Price"""
     data["Date"] = transform_date(data["תאריך"])
     renaming = {
         "כמות רכישה": "Volume",
@@ -541,12 +550,38 @@ def convert_shapeshift0(data):
         "עמלה (אופציונלי)": "Fee",
         "מטבע עמלה (אופציונלי)": "FeeCurrency",
         "כמות מכירה": "Sold",
+        "זירה": "Account"
     }
     renamed = data.rename(columns=renaming)
     renamed["Volume"] = renamed["Volume"].where(renamed["Volume"] > 0, renamed["Sold"])
     renamed["Action"] = "BUY"
-    renamed.loc[renamed["Sold"] > 0, "Action"] = "SELL"
+    renamed["Fee"] = 0.01 * renamed["Volume"]
+    renamed["FeeCurrency"] = renamed["Symbol"]
+    prices = []
+    for index, row in renamed.iterrows():
+        symbol_rate = _get_coin_conversion_rate(row["Symbol"], row["Date"])
+        currency_rate = _get_coin_conversion_rate(row["Currency"], row["Date"])
+        price = symbol_rate / currency_rate
+        prices.append(price)
+    renamed["Price"] = prices
     return renamed
+
+
+def _get_coin_conversion_rate(coin: str, date: datetime.datetime) -> float:
+    """Returns the conversion rate of the given coin to USD,
+    as found from Bitfinex's API in the given date.
+    """
+    bitfinex_url = 'https://api-pub.bitfinex.com/v2/trades/t{}USD/hist'
+    coin = coin.upper()
+    date = int(pd.to_datetime(date).timestamp() * 1000.0)
+    params = {'limit': 1, 'start': date, 'end': date + 86400000, 'sort': 1}
+    try:
+        r = requests.get(bitfinex_url.format(coin), params=params)
+        r.raise_for_status()
+    except requests.HTTPError:
+        raise
+    else:
+        return r.json()[0][3]
 
 
 def convert_trade0(data):
