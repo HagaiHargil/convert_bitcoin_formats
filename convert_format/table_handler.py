@@ -55,6 +55,22 @@ bit2c1 = (
     "ref",
 )
 
+bit2c2 = (
+    "id",
+    "created",
+    "accountAction",
+    "firstCoin",
+    "secondCoin",
+    "firstAmount",
+    "secondAmount",
+    "price",
+    "feeAmount",
+    "fee",
+    "balance1",
+    "balance2",
+    "ref",
+)
+
 bitfinex0 = ("#", "PAIR", "AMOUNT", "PRICE", "FEE", "FEE CURRENCY", "DATE", "ORDER ID")
 bittrex0 = (
     "Uuid",
@@ -158,6 +174,23 @@ trade0 = (
     "Base Total Less Fee",
     "Quote Total Less Fee",
 )
+
+trade1 = (
+    "Date",
+    "Market",
+    "Category",
+    "Type",
+    "Price",
+    "Amount",
+    "Total",
+    "Fee",
+    "Order Number",
+    "Base Total Less Fee",
+    "Quote Total Less Fee",
+    "Fee Currency",
+    "Fee Total",
+)
+
 trades0 = (
     "Date (UTC)",
     "Instrument",
@@ -585,7 +618,6 @@ def _get_coin_conversion_rate(coin: str, date: datetime.datetime) -> float:
 
 
 def convert_trade0(data):
-    """Market?"""
     data["Date"] = transform_date(data["Date"])
     renaming = {"Type": "Action", "Amount": "Volume"}
     renamed = data.rename(columns=renaming)
@@ -593,6 +625,13 @@ def convert_trade0(data):
     renamed["Fee"] = renamed["Fee"].str[:-1]
     renamed["Symbol"] = renamed["Market"].str.split("/", expand=True)[0]
     renamed["Currency"] = renamed["Market"].str.split("/", expand=True)[1]
+    return renamed
+
+
+def convert_trade1(data):
+    renamed = convert_trade0(data)
+    renamed["Fee"] = data["Fee Total"]
+    renamed["FeeCurrency"] = data["Fee Currency"]
     return renamed
 
 
@@ -612,6 +651,7 @@ table_origin = {
     binance0: convert_binance0,
     bit2c0: convert_bit2c0,
     bit2c1: convert_bit2c1,
+    bit2c2: convert_bit2c1,
     bitfinex0: convert_bitfinex0,
     bittrex0: convert_bittrex0,
     cex0: convert_cex0,
@@ -621,5 +661,6 @@ table_origin = {
     member0: convert_member0,
     shapeshift0: convert_shapeshift0,
     trade0: convert_trade0,
+    trade1: convert_trade1,
     trades0: convert_trades0,
 }
