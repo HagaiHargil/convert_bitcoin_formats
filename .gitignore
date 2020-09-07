@@ -9,3 +9,4 @@ upx*/
 converter.egg-info/
 .mypy_cache/
 *_converted.csv
+*.zip

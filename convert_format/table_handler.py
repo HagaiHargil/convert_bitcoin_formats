@@ -205,6 +205,9 @@ trades0 = (
     "Total",
 )
 
+idex0 = (
+    'a',
+)
 
 def identify_table_origin(columns):
     return table_origin[tuple(columns.to_list())]
@@ -216,6 +219,9 @@ def transform_date(col: pd.Series):
     """
     return pd.to_datetime(col, utc=True).dt.strftime(DATETIME_FORMAT)
 
+
+def convert_idex0(data):
+    pass
 
 def convert_binance0(data):
     data["Date(UTC)"] = transform_date(data["Date(UTC)"])
@@ -663,4 +669,5 @@ table_origin = {
     trade0: convert_trade0,
     trade1: convert_trade1,
     trades0: convert_trades0,
+    idex0: convert_idex0,
 }

@@ -41,6 +41,19 @@ def filter_unneeded_rows(data: pd.DataFrame) -> FilteredData:
     return FilteredData(legal_rows, uniques)
 
 
+def replace_invalid_currencies(filtered: FilteredData):
+    new_data = filtered.data
+    try:
+        new_data = new_data.replace({'Currency': {'NIS': 'ILS'}})
+    except TypeError:
+        pass
+    try:
+        new_data = new_data.replace({'FeeCurrency': {'NIS': 'ILS'}})
+    except TypeError:
+        pass
+    return FilteredData(new_data, filtered.illegal)
+    
+
 def format_result(filtered: FilteredData, original_size: int) -> str:
     """Formats the result of the computation to a table
     understabable by a lay person.
@@ -72,6 +85,7 @@ def run(file) -> str:
         return "Internal Error. Please contact the application's author."
     returned = reorder_columns(returned)
     filtered = filter_unneeded_rows(returned)
+    filtered = replace_invalid_currencies(filtered)
     new_fname = file.stem + '_converted' + '.csv'
     new_fname = file.with_name(new_fname)
     try:
