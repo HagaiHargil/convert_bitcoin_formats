@@ -206,8 +206,29 @@ trades0 = (
 )
 
 idex0 = (
-    'a',
+    "Date",
+    "Type",
+    "Asset",
+    "Name",
+    "Amount",
+    "Status",
 )
+
+idex1 = (
+    'transactionId',
+    'transactionHash',
+    'date',
+    'market',
+    'makerOrTaker',
+    'buyOrSell',
+    'tokenAmount',
+    'etherAmount',
+    'usdValue',
+    'fee',
+    'gasFee',
+    'feesPaidIn',
+)
+
 
 def identify_table_origin(columns):
     return table_origin[tuple(columns.to_list())]
@@ -221,7 +242,27 @@ def transform_date(col: pd.Series):
 
 
 def convert_idex0(data):
-    pass
+    raise NotImplementedError
+    data["Date"] = transform_date(data["Date"])
+    data = data.loc[data.loc[:, "Status" == "COMPLETE"], :]
+    renaming = {"Type": "Action", "Amount": "Volume", "Asset": "Symbol"}
+
+
+def convert_idex1(data):
+    data["date"] = transform_date(data["date"])
+    renaming = {
+        "date": "Date",
+        "buyOrSell": "Action",
+        "etherAmount": "Volume",
+        "fee": "Fee",
+        "feesPaidIn": "FeeCurrency",
+    }
+    renamed = data.rename(columns=renaming)
+    renamed['Action'] = renamed['Action'].str.upper()
+    renamed["Symbol"] = renamed["market"].str.split("/", expand=True)[0]
+    renamed["Currency"] = renamed["market"].str.split("/", expand=True)[1]
+    return renamed
+
 
 def convert_binance0(data):
     data["Date(UTC)"] = transform_date(data["Date(UTC)"])
@@ -543,7 +584,7 @@ def convert_ledgers0(data):
     for _, trade in data.groupby("refid"):
         if len(trade) != 2:
             continue
-        if trade["type"].iloc[0] != 'trade':
+        if trade["type"].iloc[0] != "trade":
             continue
         converted_row["Date"] = transform_date(trade.loc[:, "time"]).iloc[0]
         coin_names = trade.loc[:, "asset"].str[1:].replace("XBT", "BTC")
@@ -589,7 +630,7 @@ def convert_shapeshift0(data):
         "עמלה (אופציונלי)": "Fee",
         "מטבע עמלה (אופציונלי)": "FeeCurrency",
         "כמות מכירה": "Sold",
-        "זירה": "Account"
+        "זירה": "Account",
     }
     renamed = data.rename(columns=renaming)
     renamed["Volume"] = renamed["Volume"].where(renamed["Volume"] > 0, renamed["Sold"])
@@ -610,10 +651,10 @@ def _get_coin_conversion_rate(coin: str, date: datetime.datetime) -> float:
     """Returns the conversion rate of the given coin to USD,
     as found from Bitfinex's API in the given date.
     """
-    bitfinex_url = 'https://api-pub.bitfinex.com/v2/trades/t{}USD/hist'
+    bitfinex_url = "https://api-pub.bitfinex.com/v2/trades/t{}USD/hist"
     coin = coin.upper()
     date = int(pd.to_datetime(date).timestamp() * 1000.0)
-    params = {'limit': 1, 'start': date, 'end': date + 86400000, 'sort': 1}
+    params = {"limit": 1, "start": date, "end": date + 86400000, "sort": 1}
     try:
         r = requests.get(bitfinex_url.format(coin), params=params)
         r.raise_for_status()
@@ -670,4 +711,5 @@ table_origin = {
     trade1: convert_trade1,
     trades0: convert_trades0,
     idex0: convert_idex0,
+    idex1: convert_idex1,
 }
